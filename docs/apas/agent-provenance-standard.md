@@ -1,159 +1,172 @@
 # Agent Provenance Attestation Standard (APAS)
 
-**Version**: APAS 0.3.1-draft
+**Version**: APAS 0.4.0-draft
 **Status**: Draft
 **Authors**: Agentic Research
-**Date**: 2026-08-07
+**Date**: 2026-08-12
 
-> **APAS versions independently of any implementation, including signet.**
-> Always write the version with its prefix — "APAS 0.3.1" — never a bare
-> "0.3.1". This document happens to live in the signet repository, which
-> published `v0.3.0` on 2026-08-07, so a bare version number here is ambiguous
-> between the standard and the CLI. The two move on different clocks: APAS
-> changes when the specification changes, signet when the software ships. They
-> have already diverged — this revision is APAS 0.3.1 while signet remains at
-> v0.3.0 — which is the normal case, not a mistake to reconcile. Any future
-> tag for this document uses an `apas/vX.Y.Z` prefix so it cannot collide with
-> a signet release tag.
+APAS versions independently of every implementation. Always include the `APAS`
+prefix when naming a version. Tags for this document use the
+`apas/vX.Y.Z` namespace so they cannot be confused with implementation releases.
 
-> **APAS 0.3.1 changes**: Separates each level's **Requirement** from the
-> bullets beneath it. The bullets described one ecosystem's implementation —
-> `previous_chain_hash`, dispatch manifests, bridge certificates, a shared
-> CMS/Ed25519 primitive, ACP `request_permission` — while sitting in the
-> position readers take as conformance criteria. An implementer could not tell
-> which lines they had to satisfy and which merely narrated how we did it.
-> Each level now states **core properties** in mechanism-neutral terms, with
-> the original bullets retained as a named **reference profile**. §2.0 gives
-> the reading rule. Prompted by measuring a second, independent implementation
-> against L2–L4 (§7.7): it satisfies every requirement while failing most
-> bullets, and by the property that matters — an externally certified signing
-> identity rather than a self-held key — it is *stronger* than the profile
-> that defined the level. A conformance scheme that scores that as
-> non-conformant is measuring the wrong thing.
->
-> **APAS 0.3.0 changes**: Adds §2.5, **content origin** — the missing rung between
-> L3 and L4. L3 proves the execution boundary held; L4 demands attested
-> inputs; nothing said what it means for a piece of content to have a *known
-> origin*, which is the property that lets a deployment widen what an agent
-> may consume without weakening its claims. The model is adopted from
-> a shipped implementation rather than from a proposal (§7.5 cites it), and
-> its hard-won distinctions are carried with it: a vouching **authority
-> identifier** rather than a trusted/untrusted boolean, confidence **derived
-> at evaluation time** against the evaluator's own trust set, and a category
-> line between *who submitted* and *where content came from*. §5.2 gains the
-> two threats this does not address. Also: the normative sections now speak
-> in **roles** rather than product names (see Roles, below) — an earlier
-> draft read as a description of one ecosystem rather than a standard — and
-> §7.5/§7.6 are corrected so the isolation substrate is credited with the
-> boundary it actually enforces.
+> **APAS 0.4 changes conformance semantics.** It defines conformance over a
+> bounded agent Activity and declared evidence scope, makes assurance levels
+> cumulative, and separates the protocol core from implementation profiles.
+> Mechanisms inherited from the original ART implementation remain available
+> in a non-normative profile; they are no longer universal requirements.
 
-> **APAS 0.2.1 changes**: Reconciled implementation-status language with the code as
-> shipped. The orchestrator emits signed DSSE handoff envelopes only when an
-> attestation key is configured; without a key it emits no artifact by default,
-> and an explicit forensic opt-in writes a raw in-toto Statement rather than an
-> unsigned DSSE envelope. Dispatch-manifest and commit signing remain targets.
-
-> **Reading guide**: Sections marked **[CURRENT]** describe behavior that exists
-> today in the reference implementation (see Roles). Sections marked **[TARGET]** describe the
-> intended design that is not yet implemented. Sections marked **[PARTIAL]**
-> describe a level whose prerequisites have shipped and whose implementation is
-> in flight — some bullets within the section are shipped (annotated **shipped**)
-> and others are open (annotated **not yet implemented**).
+The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
+RECOMMENDED, NOT RECOMMENDED, MAY, and OPTIONAL in this document are to be
+interpreted as described in BCP 14 when, and only when, they appear in all
+capitals.
 
 ## Abstract
 
-The Agent Provenance Attestation Standard (APAS) defines a protocol for cryptographically verifiable provenance chains across autonomous AI agent pipelines. It specifies how agent orchestrators record, sign, and verify the complete chain from work decomposition through agent execution to code delivery.
+The Agent Provenance Attestation Standard (APAS) is a protocol for recording,
+authenticating, appraising, and reconstructing the provenance of bounded AI-agent
+Activities. An Activity is in scope when an AI Agent observes inputs, influences
+decisions, invokes tools, or produces outputs whose provenance a Relying Party
+needs to evaluate.
 
-APAS is implementation-agnostic.
+APAS defines a shared ontology, an additive assurance model, and a baseline
+attestation carrier. It does not prescribe an orchestrator, runtime, isolation
+technology, identity provider, storage system, or deployment topology. A
+long-lived Workload may perform many Activities, and an Activity may span
+multiple processes, machines, or periods of suspension. Workload identity and
+Activity identity are therefore related but distinct.
 
-### Roles
+### 0.1 Protocol roles
 
-The normative sections (§1–§6 and the appendices) refer to **roles**, never
-to products. A conforming deployment fills each role with something; which
-something is not APAS's business. Named systems appear only in §7, in
-example payloads, and in citations marked as reference-implementation
-evidence.
+APAS uses established provenance and remote-attestation roles. A component MAY
+fill more than one role, except where a claimed assurance level requires those
+roles to be independently controlled.
 
-| Role | Responsibility | Reference implementation |
-|------|----------------|--------------------------|
-| **Orchestrator** | Decomposes work, dispatches agents, writes attestations | rosary |
-| **Identity authority** | Issues the identity a dispatch signs as; defines token and certificate formats | signet |
-| **Signing primitive** | The CMS/DSSE implementation attestations are produced with | ley-line |
-| **Isolation substrate** | Enforces the L3 boundary a dispatch runs inside | cloister + LLO |
-| **Work-item tracker** | Holds the content-hashed task record a dispatch targets | rosary (`.beads/`) |
-| **Context projector** | Serves repository/code context to dispatches as content | mache |
-| **Predicate namespace** | Hosts the schema URIs attestations reference | notme.bot |
+| Role | APAS meaning |
+|---|---|
+| **AI Agent** | Software or a model-mediated system that observes, decides, invokes tools, or emits outputs during an Activity. In W3C PROV terms it is an Agent associated with the Activity. |
+| **Workload** | A deployed software instance or collection of code and configuration that performs Activities. Its identity may be expressed using SPIFFE or another identity system. |
+| **Attester** | Produces Evidence about an Activity, Workload, execution boundary, or Entity. |
+| **Verifier** | Appraises Evidence against policy and produces an Attestation Result. |
+| **Relying Party** | Uses an APAS attestation or Attestation Result to make a decision. |
 
-> **Why this table exists.** An earlier draft named products throughout its
-> normative text. That reads as a description of one ecosystem rather than
-> a standard — a second implementer could not tell which requirements were
-> essential and which were incidental to how the reference implementation
-> happens to be built. Where a role name would be genuinely ambiguous, the
-> reference implementation is cited parenthetically and marked as such.
+The complete vocabulary is normative and defined in Appendix A.
 
-### Normative References
+### 0.2 Normative references
 
-APAS builds on and references these existing specifications rather than reinventing them:
+APAS reuses these specifications rather than creating incompatible equivalents:
 
-**External** — publicly resolvable, and the only references a second
-implementation strictly needs:
+| Specification | APAS use |
+|---|---|
+| [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174) | Normative requirement language (BCP 14) |
+| [W3C PROV-DM](https://www.w3.org/TR/prov-dm/) | Entity, Activity, Agent, Plan, and causal relations |
+| [SPIFFE Concepts](https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/) | Workload and Workload identity terminology |
+| [IETF RATS Architecture, RFC 9334](https://www.rfc-editor.org/rfc/rfc9334) | Attester, Evidence, Verifier, Attestation Result, and Relying Party roles |
+| [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md) | Event records of Occurrences |
+| [in-toto Statement v1](https://in-toto.io/Statement/v1) | Baseline attestation statement |
+| [DSSE](https://github.com/secure-systems-lab/dsse/blob/master/protocol.md) | Baseline authentication envelope at L2 and above |
+| [SLSA v1.0](https://slsa.dev/spec/v1.0/) | Additive assurance and protected provenance generation |
 
-| Spec | Source | APAS Usage |
-|------|--------|-----------|
-| in-toto Statement | https://in-toto.io/Statement/v1 | Attestation envelope format |
-| DSSE | Dead Simple Signing Envelope | Signature wrapper |
-| SLSA v1.0 | https://slsa.dev/spec/v1.0 | Conformance level model |
-| RFC 5652 / RFC 8419 | IETF | CMS with PureEdDSA, for the signing primitive |
+OpenTelemetry Events and software-bill-of-materials formats are informative
+integrations, not APAS ontology or carrier requirements.
 
-**Reference-implementation evidence** — cited so claims in this document are
-checkable by someone with access to these repositories, and marked because
-they are *not* required reading to implement APAS:
+### 0.3 Protocol architecture
 
-| Artifact | Where | What it evidences |
-|----------|-------|-------------------|
-| Identity token + bridge cert formats | identity authority, `docs/design/001-*`, `004-*` | The identity a dispatch signs as (§3.3) |
-| 4-entity identity decomposition | identity authority, `pkg/sigid/` | Owner/Machine/Actor/Identity |
-| Content-origin model | isolation substrate, ADR-0065 + `src/wire/origin.ts` | §2.5 — entries, vouching authorities, derived confidence |
-| Boundary declaration (`confinement/v1`) | isolation substrate manifest | §2 L3 — fs/network/port committed into the bundle certificate |
+The protocol sits above implementations. Implementations are siblings: they
+interoperate through APAS records and profiles, not by depending on one another.
 
-## 1. Problem Statement
+```mermaid
+flowchart TD
+  APAS[APAS protocol core and baseline carrier]
+  N[Implementation N: orchestrated agent stack]
+  N1[Implementation N+1: independent durable agent system]
+  APAS --> N
+  APAS --> N1
+```
 
-AI coding agents autonomously modify source code. Current supply chain security (SBOM, SLSA, in-toto) tracks software components and build provenance but NOT agent decision chains. This gap means:
+An implementation can distribute APAS roles across a hypervisor, cluster
+service, agent runtime, identity authority, and storage tier, or combine them
+where the claimed assurance level permits. Topology is expressed by profiles;
+it is not part of the core ontology.
 
-- Agent work is indistinguishable from human work after commit
-- Supply chain attacks can inject malicious code via compromised agent pipelines
-- No forensic trail linking code changes to the decision chain that produced them
-- No way to verify that an agent operated within its authorized scope
+### 0.4 Activity lifecycle
 
-### 1.1 The Trivy/Aqua Precedent (March 2026)
+An Activity has a stable identity and one or more Segments. Suspension ends a
+Segment without ending the Activity. A conforming resume starts a new Segment
+under the same Activity only after continuity has been verified.
 
-TeamPCP compromised Trivy by exploiting mutable git tag references and long-lived service account tokens. The scanner itself was replaced with a malicious version. Key lessons:
+```mermaid
+stateDiagram-v2
+  [*] --> Active: start Event
+  Active --> Active: append Event
+  Active --> Suspended: suspend and checkpoint
+  Suspended --> Active: verify continuity; start new Segment
+  Active --> Ended: end Event
+  Suspended --> Ended: cancel, expire, or unrecoverable error
+  Ended --> [*]
+```
 
-1. **Mutable references are attack vectors** — content-addressed references are required
-2. **Long-lived credentials enable persistence** — short-lived, scoped credentials limit blast radius
-3. **The auditor must not be the audited** — split trust between execution and attestation
+Continuity binds the checkpoint, effective authority, and every
+behavior-changing configuration input. `Ended` is terminal: retrying work
+creates a new Activity and MAY relate it to the prior Activity. Lifecycle state,
+termination reason, and work outcome are distinct claims. For example, an
+Activity may end normally with a failed outcome, or expire with an unknown
+outcome.
 
-### 1.2 Why SBOMs Are Insufficient
+## 1. Problem statement
 
-SBOMs (CycloneDX, SPDX) answer "what components are in this software?" Agent provenance answers "who decided to make this change, why, with what tools, under what authority, and can we prove it?"
+AI agents increasingly modify source code, operate services, reconcile desired
+state, and produce decisions consumed by other systems. Existing software supply
+chain records identify components and build steps, but do not necessarily capture
+the bounded agent Activity that selected inputs, invoked tools, exercised
+authority, and generated an output. Without that provenance:
 
-| Property | SBOM | Agent Provenance |
-|----------|------|-----------------|
-| Scope | Components | Decisions + Actions |
-| Temporal | Point-in-time | Causal chain |
-| Identity | Package origin | Dispatch (the running execution) + agent persona + orchestrator + user |
-| Verification | Hash matching | Signature chain |
-| Trust model | Publisher attestation | Multi-party attestation |
+- agent work may be indistinguishable from human or conventional automation;
+- compromised agent infrastructure can inject outputs through a trusted path;
+- investigators cannot reliably connect outputs to relevant inputs, tool use,
+  authority, or lifecycle transitions; and
+- Relying Parties cannot verify that declared execution constraints were
+  independently observed and appraised.
 
-> **Terminology**: APAS distinguishes the **agent** (a persona/role definition,
-> e.g. `dev-agent`, `staging-agent` — described by a `.md` file) from the
-> **dispatch** (a specific running execution of that agent — the entity that
-> bears the bridge-cert as its identity and is sandboxed at L3). One agent
-> definition can produce many dispatches. The dispatch is the unit of
-> cryptographic identity in APAS; analogous to SPIFFE's "workload," but the
-> term "workload" is avoided because it implies deterministic execution of a
-> known program, whereas an AI agent dispatch is non-deterministic by
-> construction (same definition + same inputs ↛ same outputs).
+APAS addresses the record and its assurance. It does not establish that an
+agent's reasoning was correct, require disclosure of private chain-of-thought,
+or replace review of the resulting work.
+
+### 1.1 Supply-chain lessons
+
+The March 2026 compromise of Trivy demonstrated three lessons relevant to agent
+provenance:
+
+1. Mutable references are attack surfaces; security-relevant inputs and outputs
+   need content-bound identities.
+2. Long-lived, ambient credentials increase persistence and blast radius;
+   authority should be short-lived, scoped, and attributable to its use.
+3. Self-recording is not independent appraisal; stronger claims require a
+   Verifier and protected authority outside the Activity being appraised.
+
+These lessons constrain APAS assurance claims without prescribing one runtime or
+credential format.
+
+### 1.2 Why an SBOM is insufficient
+
+SBOMs such as CycloneDX and SPDX answer, “Which components are present?” APAS
+answers, “Which bounded agent Activity used and generated these Entities, which
+Agent and Workload were associated with it, what relevant Occurrences were
+recorded as Events, under what authority did it operate, and what Evidence
+supports those claims?”
+
+| Property | SBOM | APAS provenance |
+|---|---|---|
+| Primary subject | Components | Agent Activity and related Entities |
+| Temporal model | Inventory or point-in-time snapshot | Lifecycle, Segments, Events, and causal relations |
+| Identity | Package or publisher | Activity, Agent, Workload, Evidence producer, and authority |
+| Verification | Digests and publisher metadata | Authenticated records and, at higher levels, independent appraisal |
+| Outcome | Component presence | Distinct lifecycle, termination, and work-outcome claims |
+
+A Workload is not an Activity. A Workload is long-lived deployed software and
+may conduct many Activities. An Activity is the bounded provenance subject whose
+identity persists across its Segments. A process, job, request, dispatch, run,
+reconciliation, or capsule MAY map to an Activity or Segment under a topology
+profile, but none of those implementation terms is universal.
 
 ## 2. Conformance Levels
 
@@ -977,22 +990,75 @@ restarts is an open question for a future revision.
 
 ## Appendix A: Glossary
 
-- **APAS**: Agent Provenance Attestation Standard
-- **Agent**: A persona / role definition (e.g. `dev-agent`, `staging-agent`) — typically a `.md` file. Not a running thing; one agent definition can produce many dispatches.
-- **Dispatch**: One specific running execution under an agent definition. The unit of cryptographic identity (bears the bridge cert). The term is preferred over SPIFFE's "workload" because AI dispatches are non-deterministic by construction (same definition + same inputs ↛ same outputs).
-- **Bridge Certificate**: Short-lived X.509 cert delegating identity from master key to a dispatch. Identifies the running execution.
-- **DSSE**: Dead Simple Signing Envelope (in-toto signing format)
-- **Handoff**: Structured context transfer between pipeline phases
-- **Manifest**: Dispatch SBOM — complete record of a single dispatch's execution
-- **Work Item**: An orchestrator-tracked, file-scoped, content-hashed task that is the dispatch target. Implementation-defined; in the rosary reference implementation a work item is a *bead* (tracked in `.beads/`).
-- **Origin Entry** (§2.5): A pair `(uri, vouchedBy)` recording where a piece of content came from and which authorities vouch for that attribution. `vouchedBy` may be empty — "ingested, unvouched" is a statable fact, not a missing one.
-- **Vouching Authority** (§2.5): A named party asserting an origin attribution. Named rather than resolved to a trust bit, because the ingest point does not know the evaluator's trust set.
-- **Derived Confidence** (§2.5): `origin-attested` / `origin-asserted` / `origin-unknown`, computed at evaluation time from an origin set and the evaluator's trusted authorities. Never stored — storing it would freeze one party's trust set into a record another party must evaluate.
-- **Origin Set**: The union of origin entries for derived content, ordered canonically and deduplicated by the whole pair.
-- **Bead** *(rosary-specific)*: rosary's name for a Work Item; tracked in `.beads/`.
-- **BDR** *(rosary-specific)*: Bead Decomposition Record — how ADRs decompose into dispatchable work in rosary.
-- **Thread** *(rosary-specific)*: Ordered group of related beads.
-- **Decade** *(rosary-specific)*: ADR-level grouping of threads.
+This appendix is the canonical vocabulary for normative APAS sections. The
+classifications describe roles in the protocol and are not necessarily disjoint.
+In particular, a receipt can be an Event because it records an Occurrence, an
+Entity because it is data used or generated by an Activity, and Evidence because
+a Verifier can appraise it.
+
+- **AI Agent**: Software or a model-mediated system that observes inputs,
+  influences decisions, invokes tools, or produces outputs during an Activity.
+  It is a W3C PROV Agent associated with that Activity. A model, persona, policy,
+  or runtime component may contribute to the Agent's identity but is not by
+  itself the Activity.
+- **Activity**: A bounded execution or course of agent work that is the unit of
+  APAS provenance and conformance. It has a stable identity, lifecycle, declared
+  evidence scope, and causal relations to Agents and Entities. It may span
+  multiple processes, machines, and Segments.
+- **Segment**: One continuous portion of an Activity. Suspension ends a Segment;
+  verified resume begins another Segment under the same Activity identity.
+- **Workload**: Long-lived deployed software, including its relevant code and
+  configuration, that performs one or more Activities. This follows SPIFFE usage
+  and does not imply deterministic behavior.
+- **Workload identity**: An identity assigned to a Workload instance or class of
+  Workloads. It identifies what is performing an Activity, not the Activity
+  itself. SPIFFE IDs are one possible representation.
+- **Entity**: A physical, digital, conceptual, or other thing with fixed aspects
+  relevant to provenance, following W3C PROV. Inputs, outputs, checkpoints,
+  configuration, model artifacts, prompts, receipts, and attestations may be
+  Entities.
+- **Plan**: An Entity describing intended actions, constraints, or goals for one
+  or more Activities, following W3C PROV. A Plan is intent, not proof that its
+  instructions were followed.
+- **Occurrence**: Something that happens in or affects an Activity, such as a
+  tool invocation, policy decision, lifecycle transition, or output emission.
+  An Occurrence is the fact in the world; it may exist without a retained record.
+- **Event**: A structured record of an Occurrence. Events identify their source
+  and Activity and may carry ordering or causal claims. Event follows CloudEvents
+  usage; an OpenTelemetry Event is one optional encoding.
+- **Evidence**: Information appraised by a Verifier when evaluating claims about
+  an Activity, Entity, Workload, or execution environment, following RATS.
+  Evidence may be inline or content-addressed by an APAS attestation.
+- **Attester**: A role that produces Evidence about an Activity, Workload,
+  Entity, or execution boundary, following RATS.
+- **Verifier**: A role that appraises Evidence against policy and produces an
+  Attestation Result, following RATS. “Independent” means the Activity cannot
+  control the Verifier's protected state or result-signing authority.
+- **Attestation Result**: A Verifier's output from appraising Evidence against
+  policy, including the claims evaluated, result, and relevant policy or trust
+  context. It is not synonymous with raw Evidence.
+- **Relying Party**: A role that consumes an APAS attestation or Attestation
+  Result to make a decision, following RATS.
+- **APAS attestation**: An authenticated statement that makes APAS claims about
+  one Activity and a declared evidence scope using the baseline carrier or a
+  losslessly mapped alternative carrier. An L1 record is provenance but is not
+  an authenticated APAS attestation.
+- **Profile**: A named, versioned set of additional constraints or mappings for a
+  carrier, Activity topology, Evidence type, identity system, or implementation.
+  Profiles may add requirements but cannot waive the requirements of a claimed
+  APAS assurance level.
+- **Origin entry**: A pair `(uri, vouchedBy)` recording where an Entity's content
+  came from and which authorities vouch for that attribution. `vouchedBy` may be
+  empty; “ingested, unvouched” is a claim distinct from missing origin data.
+- **Vouching authority**: A named party asserting an origin attribution. APAS
+  records the identifier rather than a universal trust bit because each
+  evaluator has its own trust policy.
+- **Derived confidence**: `origin-attested`, `origin-asserted`, or
+  `origin-unknown`, computed at evaluation time from origin entries and the
+  evaluator's trusted authorities. It is not stored as an intrinsic property of
+  content.
+- **Origin set**: The canonical, whole-pair-deduplicated union of origin entries
+  for an Entity.
 
 ## Appendix B: Domain Separation
 
