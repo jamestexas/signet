@@ -168,200 +168,174 @@ identity persists across its Segments. A process, job, request, dispatch, run,
 reconciliation, or capsule MAY map to an Activity or Segment under a topology
 profile, but none of those implementation terms is universal.
 
-## 2. Conformance Levels
+## 2. Assurance levels
 
-Inspired by SLSA, APAS defines four conformance levels. Each builds on the previous.
+APAS defines four cumulative assurance levels. A level is claimed for one
+Activity and one declared evidence scope, not for a product, cluster, or
+collection of components in the abstract. A conforming claim MUST identify the
+APAS version, claimed level, Activity, evidence scope, and applied profiles.
 
-### 2.0 How to read a level: requirement, core properties, profile
+### 2.0 Conformance rule
 
-Each level below has three parts, and only two of them are normative.
+Each higher level includes every requirement of the preceding level for the same
+Activity and evidence scope. Profiles MAY add requirements or define mechanisms,
+but MUST NOT waive, weaken, or silently reinterpret a core requirement.
+Implementation status and reference mappings are non-normative.
 
-| Part | Normative? | What it is |
-|---|---|---|
-| **Requirement** | **Yes** | One sentence. The claim the level makes. |
-| **Core properties** | **Yes** | The requirement decomposed into testable properties. States *what* must hold, never *how*. An implementation conforms by satisfying these. |
-| **Reference profile** | **No** | How one named stack satisfies them. Illustrative. Naming a different mechanism is not non-conformance. |
+Properties supplied by different components cannot be mechanically unioned into
+a level. For example, a protected runtime, an unrelated signed log, and a
+separate identity service do not jointly establish L3 unless their Evidence and
+identities are bound to the same Activity, scope, and causal record.
 
-A core property MUST NOT name a signing algorithm, envelope format, wire
-protocol, namespace, `predicateType`, product, or file path. If it cannot be
-stated without one, it belongs in a profile.
+Every level below states explicit failure conditions. A claim that cannot be
+falsified from the declared records and Evidence is not a conformance claim.
+Algorithms, envelope encodings, product names, and deployment topology belong in
+the baseline carrier or profiles unless a level explicitly requires a security
+property they provide.
 
-Each core property MUST be falsifiable: the level states what evidence would
-show an attestation *fails* it. A property no attestation could fail is
-decoration.
+### L1 — Recorded Agent Activity
 
-> **Why this section exists.** Earlier drafts put implementation bullets
-> directly beneath each Requirement, where readers reasonably took them as the
-> criteria. That made APAS unimplementable by anyone who had not built the
-> reference stack — not because the properties were parochial, but because
-> the prose was. Profiles are how a standard stays honest about its own
-> origins without imposing them.
+**Requirement:** The Activity is represented by a structured record sufficient
+to identify its declared provenance and interpret its lifecycle and outcome.
 
-Two profiles are referenced throughout. The **orchestrator profile** is the
-dispatch-oriented reference implementation (see Roles). The **reconciler
-profile** is an independent implementation whose unit of work is a key
-reconciled to convergence rather than a dispatch (§7.7). Where they diverge,
-the divergence is evidence about the *standard*, not about either
-implementation.
+An L1 record MUST contain:
 
-### Level 1: Audit Trail (L1) **[CURRENT — partial]**
+- a stable Activity identity that correlates every Segment, including Segments
+  before and after suspension;
+- the associated AI Agent and Workload identity, including the model and model
+  provider when known and an explicit unknown value when not known;
+- references to behavior-changing input Entities and generated output Entities;
+- Events for tool operations and other Occurrences relevant to the declared
+  capture scope;
+- lifecycle state, termination reason, and work outcome as separate fields;
+- claimed causal relations among the Activity, Agent, Plan, Entities, Events,
+  and any parent or child Activities; and
+- a declared capture scope identifying intentionally omitted classes of Events,
+  Entities, or data.
 
-**Requirement**: Every dispatch action is recorded with structured metadata.
+L1 is a forensic record, not a security boundary. Its producer may alter or
+forge it, and unknown information remains unknown even when the record is
+well-formed.
 
-- Dispatch manifest captures: dispatch ID, agent name, provider, model (when reported), permission profile, work-item reference, pipeline phase, and timestamps — **shipped**. Binding the dispatch ID to a bridge-cert subject is **not yet implemented**.
-- Tool calls logged to an append-only stream file (reference implementation: `.rsry-stream.jsonl`)
-- Pipeline phase transitions recorded with handoff documents
-- All records are JSON, machine-parseable
+**Fails** if resume loses the stable Activity correlation; a relevant tool
+operation inside the declared capture scope is omitted; unknown model, time,
+origin, or outcome data is represented as known; or termination/completion can
+be interpreted as successful work without a distinct outcome claim.
 
-**What it proves**: "We know what happened." Forensic reconstruction is possible.
+### L2 — Authenticated Provenance
 
-**What it does NOT prove**: Records haven't been tampered with.
+**Requirement:** L2 includes L1 and authenticates the Activity record and its
+Evidence references so a third party can verify who produced each claim and
+whether its signed content changed.
 
-> **Important**: L1 provides **forensic value** (post-incident reconstruction) but
-> **limited preventive value**. The orchestrator that writes provenance records is
-> the same entity being audited. At L1, provenance is self-attested — useful for
-> debugging and audit, but an attacker who compromises the orchestrator can forge
-> records. Do not treat L1 as a security boundary.
+An L2 APAS attestation MUST:
 
-### Level 2: Signed Attestations (L2) **[PARTIAL — handoff path shipped, dispatch/commit pending]**
+- authenticate the complete L1 information set and every Evidence reference
+  within the claimed evidence scope;
+- name the producer identity in a form a Relying Party can bind to an
+  independently configured trust policy;
+- permit offline or third-party verification without treating the producer or
+  the producer's current transport endpoint as the sole trust anchor;
+- fail closed when signing authority is absent, unreadable, expired, revoked, or
+  otherwise unusable; and
+- bind claimed ordering or causal predecessor relations into authenticated
+  content rather than filenames, timestamps, or storage layout alone.
 
-**Requirement**: Every attestation is cryptographically signed by the entity that produced it.
+L2 establishes authenticity and tamper evidence for the producer's claims. It
+does not establish that the producer observed the Activity correctly, that the
+Activity was isolated, or that a signed claim is true.
 
-**Core properties** (normative):
+**Fails** if a signed-looking artifact can be emitted with an empty or missing
+signature; verification accepts trust material supplied only by the same
+untrusted producer as its root; an Evidence reference can be substituted without
+invalidating authentication; or records that claim strict order can be reordered
+without detection.
 
-- **L2.1** — Every attestation carries a signature over its own content, produced by the entity that generated it.
-- **L2.2** — A third party can verify that signature **without trusting the producer at the moment of the check**. Trust is anchored out of band; TLS to the issuing host is not an anchor.
-- **L2.3** — The signing identity is *named* in a form a verifier can pin, so "signed" is inseparable from "signed by whom".
-- **L2.4** — Absence of a usable signing key MUST NOT downgrade to unsigned output. Emit nothing, or emit an artifact that is *not* shaped like a signed one.
-- **L2.5** — Related attestations that claim an ordering carry that ordering in *content*, not in filenames, timestamps, or storage layout.
+### L3 — Independently Appraised Execution
 
-> *Falsification*: L2.2 fails if verification requires fetching the trust root
-> from the same host that issued the signature. L2.4 fails if any code path
-> emits a well-formed envelope with an empty or absent signature. L2.5 fails
-> if reordering two records on disk changes what the chain attests.
+**Requirement:** L3 includes L2 and binds the Activity to protected execution
+Evidence that is appraised by a Verifier outside the Activity's authority.
 
-**Reference profile — orchestrator** (non-normative; one way to satisfy the above):
+For L3:
 
-- Hash chain links content hashes, not file paths — **shipped** in the reference orchestrator (`Handoff::previous_chain_hash`)
-- Handoff documents wrapped in a DSSE envelope around in-toto Statement v1 — **shipped**, but only when the orchestrator holds an Ed25519 attestation key. Without a key it MUST emit no artifact by default; an explicit forensic opt-in MAY write a raw `.intoto.json` Statement as L1 evidence, never an unsigned DSSE envelope. A configured but unreadable key MUST NOT downgrade to unsigned output.
-- Dispatch manifests signed by orchestrator key — **not yet implemented**
-- Commit signatures via the identity authority's bridge certificates (reference: [`docs/design/004-bridge-certs.md`](../design/004-bridge-certs.md)) — **not yet implemented**
-- A single shared CMS/Ed25519 signing primitive across the ecosystem — **partial**: the reference orchestrator still signs with its own Ed25519 path rather than the shared crate, though the shared crate now publishes a checksummed wasm artifact (see §7.3)
+- security-relevant Evidence MUST be protected from alteration or deletion by
+  the Activity after the underlying Occurrences take place;
+- the Activity and its Workload MUST NOT have access to the Verifier's protected
+  appraisal state or Attestation Result signing authority;
+- unrelated Activities MUST be isolated from observing or altering one another's
+  private execution state except through declared channels;
+- the effective tool, filesystem, network, credential, and other capability set
+  MUST be bounded, declared, enforced, and default-deny;
+- the declaration MUST describe what the Activity could do, not only what the
+  record says it did; and
+- a Verifier independent of the Activity MUST appraise the protected Evidence
+  and bind its Attestation Result to the Activity and evidence scope.
 
-**What it proves**: "We know what happened AND who attests to it." Tamper-evident.
+Interactive authorization and predeclared capabilities are both valid
+mechanisms when they fail closed. Advisory metadata is not enforcement. A label
+such as “destructive” or “read-only” does not change the capability set unless a
+boundary refuses disallowed operations.
 
-**What it does NOT prove**: The signing entity was operating correctly.
+L3 supports the claim that the declared execution constraints were independently
+observed and appraised. It does not establish that inputs were benign, the Agent
+made correct decisions, or the resulting work succeeded.
 
-> **Important**: Like L1, L2 is primarily **forensic**. The signing key is held by
-> the orchestrator, so a compromised orchestrator can sign false attestations.
-> L2's value is tamper-evidence for EXTERNAL observers (CI systems, code reviewers,
-> compliance tools) — they can verify the signature chain without trusting the
-> orchestrator's runtime state. But L2 alone does not prevent a compromised
-> orchestrator from producing validly-signed malicious output.
+**Fails** if the Activity can forge or rewrite its protected receipts; protected
+history is mutable without detection; the Activity can use the appraisal key or
+modify Verifier policy/state; unrelated Activities can read or modify each
+other's undeclared state; an undeclared operation succeeds; or an Attestation
+Result is not bound to the same Activity and Evidence being claimed.
 
-### Level 3: Isolated Execution (L3) **[TARGET — foundation in ACP]**
+### L4 — Content-complete Reconstruction
 
-**Requirement**: Execution is isolated from the attestation authority.
+**Requirement:** L4 includes L3 and provides authenticated commitments sufficient
+to detect omission, reordering, substitution, or mutation of every captured item
+needed to reconstruct the Activity within its declared scope.
 
-**Core properties** (normative):
+For L4:
 
-- **L3.1** — The entity that writes attestations cannot modify the executing workspace. Separation may be by process, container, VM, host, or privilege — the property is that the writer lacks the capability, not that a particular technology is used.
-- **L3.2** — Each unit of work whose provenance is attested is separable from every other. Two concurrent units MUST NOT be able to observe or alter each other's state.
-- **L3.3** — **The capability set available to a run is bounded, declared, and default-deny.** Everything the run may reach — tools, filesystem paths, network endpoints — is enumerable *before* the run starts, and anything not enumerated is unreachable.
-- **L3.4** — The declared capability set is part of the attested record, so a verifier can see what the run *could* have done, not only what it did.
+- every behavior-changing input MUST be bound by content, including instructions,
+  context, model and sampling configuration, tool definitions, policy,
+  credentials or authority, and resume configuration;
+- the Workload and runtime MUST be identified precisely enough to distinguish
+  behavior-relevant builds and configuration;
+- generated outputs and the Event history MUST be retained or committed by
+  content sufficiently for reconstruction within the declared capture scope;
+- each behavior-changing input MUST resolve to origin Evidence or an explicit
+  `origin-unknown` claim; origin coverage does not imply that an origin is
+  trusted or content is safe;
+- continuity across Segments MUST bind the checkpoint, effective authority, and
+  behavior-changing configuration, and missing or reordered Segments MUST be
+  detectable;
+- mutation of a referenced Plan, input, output, checkpoint, Event, Evidence item,
+  or other reconstructed Entity MUST be detectable; and
+- the attestation MUST declare retention, redaction, sampling, and confidentiality
+  limits so omitted content cannot be mistaken for complete capture.
 
-> **On L3.3.** Two encodings of this property are known, and both conform.
->
-> A **runtime permission boundary** interposes on each call and asks an
-> authority to allow or deny it (ACP's `request_permission` is one such
-> mechanism). A **declarative capability set** binds the permitted operations
-> up front, so an operation outside the set has no call to intercept — in the
-> reconciler profile a tool literally does not exist in the model's tool list
-> unless the host wired a callback for it.
->
-> The declarative form is the stronger default and SHOULD be preferred. It is
-> default-deny by construction rather than by policy: there is no request to
-> approve, so there is no prompt to fatigue a human into accepting and no
-> approval path to social-engineer. A runtime boundary that defaults to
-> *allow* on timeout, error, or missing policy does not satisfy L3.3 — the
-> property is default-deny, not "a decision happens".
->
-> Note that advisory metadata is not a boundary. Annotating a tool as
-> destructive or read-only informs a client's display; unless something
-> *refuses* on that basis, the capability set is unchanged and L3.3 is
-> unaffected.
+L4 establishes content-complete reconstruction only within the declared capture
+scope. Cryptographic integrity and attribution do not prove semantic correctness,
+safety, policy fitness, determinism, or a successful outcome.
 
-> *Falsification*: L3.1 fails if the attestation writer and the agent share a
-> process with write access to the same workspace. L3.3 fails if any operation
-> succeeds that was not enumerable before the run began, or if the deny path
-> is reachable only when a policy lookup succeeds.
+**Fails** if changing a behavior-relevant input can leave all authenticated
+commitments unchanged; a resume can preserve Activity identity after checkpoint,
+authority, or configuration drift; a Segment or captured Event can be removed or
+reordered without detection; mutation of retained content is undetectable; origin
+absence is treated as trusted origin; or sampled/redacted records are presented
+as complete.
 
-**Reference profile — orchestrator** (non-normative):
+### 2.5 Content origin across levels
 
-- Dispatches execute in sandboxed environments (container, VM, or OS sandbox); each running execution is one dispatch
-- The orchestrator that writes attestations cannot modify the dispatch's workspace
-- Tool calls are mediated through a permission boundary (ACP `request_permission`)
-- Network access is restricted to declared endpoints
-- File system access is scoped to the workspace
+Content origin is an Entity and Evidence property, not a fifth assurance level.
+It is meaningful from L2 upward because an unauthenticated origin record can be
+revised by the same party that chose what to consume. L2 authenticates the
+claim; L3 can protect Evidence of how content entered the Activity; L4 requires
+coverage for every behavior-changing input, including an explicit
+`origin-unknown` claim when no origin Evidence exists.
 
-**What it proves**: "The dispatch operated within declared boundaries." The fox and henhouse are separated.
-
-**What it does NOT prove**: The dispatch's inputs were not poisoned.
-
-### Level 4: Verified Inputs (L4) **[TARGET — future]**
-
-**Requirement**: Inputs to the run are themselves attested and verified.
-
-**Core properties** (normative):
-
-- **L4.1** — Every input that can change the run's behaviour is bound to the attestation by content, not by reference. Instructions, tool definitions, and sampling configuration are inputs.
-- **L4.2** — The runtime that executed the run is identified precisely enough to distinguish two builds of it.
-- **L4.3** — Model outputs are retained sufficiently for forensic reconstruction. This is an evidence property, not a real-time verification one.
-- **L4.4** — Work-item content is immutable after the run starts, or its mutation is detectable by the verifier.
-- **L4.5** — **Outcome is distinguishable from completion.** An attestation MUST NOT allow "the agent produced a result" to be read as "the work succeeded".
-
-> **On L4.5.** This property was learned from an implementation, not designed.
-> The reconciler profile marks the call that committed a run's final result
-> and documents, at the type, that it *"is not an outcome flag … committing a
-> result is no evidence that any work succeeded, because the executors steer a
-> stuck model to submit a degraded result."*
->
-> That failure mode is general: an orchestrator that nudges a stuck agent
-> toward *any* terminal answer produces runs that are structurally complete
-> and substantively empty. An attestation recording only completion is
-> correctly signed and materially misleading — the worst combination, because
-> it survives verification. Levels below L4 may record outcome; at L4 the
-> distinction is required.
-
-> *Falsification*: L4.1 fails if changing a system prompt yields a
-> byte-identical attestation. L4.5 fails if a verifier cannot separate a run
-> that solved the task from one steered into submitting a degraded result.
-
-**Reference profile — orchestrator** (non-normative):
-
-- CLAUDE.md / system prompts are content-hashed and included in attestation
-- MCP server responses are logged and hashed
-- Work-item descriptions are immutable after dispatch — the work-item tracker records a `content_hash` (reference implementation: `BeadSpec::content_hash`)
-- Model provider responses are logged (for forensic reconstruction, not real-time verification)
-- Agent definition + dispatch runtime binary/version are attested (SBOM of the runtime itself)
-
-**What it proves**: "The full chain from input to output is verifiable." End-to-end provenance.
-
-### 2.5 Content Origin — a property, not a level **[PARTIAL — implemented in the isolation substrate]**
-
-> This section is **not** "Level 5". Conformance levels are cumulative
-> claims about a *system*; content origin is a property of an individual
-> piece of *content*, and it is meaningful from L2 upward. The floor is L2
-> rather than L1 because an origin record that is not signed is not
-> evidence: at L1 the same party that chose what to consume also writes
-> the record of what it consumed, and can revise it afterwards. Origin
-> needs L2's tamper-evidence to mean anything to a third party. §2.5 is
-> numbered where it is because it lives among the level definitions it
-> bridges, not because it ranks after them.
-
-L3 proves the boundary held. L4 demands that inputs be attested. Between
-them sits the question neither answers: what does it mean for a piece of
-content to have a *known origin*?
+Origin coverage and origin trust are different. L4 requires the former so
+silence cannot masquerade as knowledge. A Relying Party's policy decides whether
+`origin-asserted`, `origin-unknown`, or only `origin-attested` content is
+acceptable.
 
 This matters because the usual way to keep an agent safe is to shrink what
 it may read — a hardcoded safelist of sources. That does not scale: every
@@ -373,7 +347,7 @@ it buys, because the temptation to overclaim here is exactly how a standard
 becomes a rubber stamp: origin makes the *record* of what was consumed
 complete and attributable. Widening the corpus remains a risk decision. What
 changes is that it becomes an **accountable** one — after an incident you can
-enumerate what the dispatch consumed and who vouched for each source, and
+enumerate what the Activity consumed and who vouched for each source, and
 before one you can require that everything consumed be `origin-attested`
 under your own trust set. A safelist answers "may I read this?" once, at
 policy-authoring time, and then stops recording. Origin answers it
@@ -423,14 +397,14 @@ set:
 | `origin-asserted` | origins are recorded, but some are unvouched or vouched by an untrusted authority |
 | `origin-unknown` | no origin information (**including the empty set**) |
 
-Derivation MUST fail closed: an empty origin set yields `origin-unknown`,
-never `origin-attested` by vacuous truth. Only `origin-attested` content
-may be used where full attestation is claimed.
+Derivation MUST fail closed: an empty origin set yields `origin-unknown`, never
+`origin-attested` by vacuous truth. An implementation MUST NOT equate L4 origin
+coverage with an `origin-attested` trust decision.
 
-**The category line (normative).** *Who submitted* content is a fact about
-an **actor**. *Where content came from* is a fact about a **proposition**.
-An implementation MUST NOT fold the submitting identity into the content's
-origin set.
+**The category line (normative).** *Who submitted* content is a fact about an
+Agent or authority associated with an Activity. *Where the Entity's content came
+from* is an origin claim about that Entity. An implementation MUST NOT fold the
+submitting identity into the content's origin set.
 
 > This is not a style preference; it was learned by getting it wrong. An
 > early cut of the reference implementation unioned the authenticated
