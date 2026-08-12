@@ -447,309 +447,328 @@ authorities stand behind that attribution."
 **What it does NOT prove**: that the content is safe, correct, or
 non-malicious — see §5.2 threat 5. Origin is *accountability*, not safety.
 
-## 3. Attestation Format
+## 3. Baseline carrier and profiles
 
-APAS uses the in-toto attestation framework with a custom predicate type.
+APAS defines one baseline logical statement so independently developed
+implementations can exchange the same claims. The baseline carrier is an in-toto
+Statement v1. L1 MAY store the logical statement without authentication; L2 and
+higher MUST authenticate it with DSSE as specified in §3.4.
 
-### 3.1 Envelope
+### 3.1 Baseline logical statement
+
+The statement MUST contain or unambiguously reference:
+
+- the APAS version, claimed assurance level, and every applied Profile name and
+  version;
+- one Activity identity, lifecycle state, and Segment identities;
+- the associated AI Agent and Workload identities, including model identity when
+  known;
+- subject Entity digests, used and generated Entities, and their causal
+  relations;
+- a Plan reference when the Activity follows declared intent;
+- inline Events or authenticated commitments to Event records;
+- Evidence references scoped to the Activity or a Segment;
+- termination reason and work outcome as distinct values;
+- an Attestation Result at L3 and L4;
+- the declared capture scope, including retention, sampling, redaction, and
+  confidentiality limits; and
+- origin Evidence or explicit origin status where required by §2.5.
+
+A carrier field MAY be absent only when the baseline declares it optional and
+the omission is semantically distinct from a known empty or unknown value.
+Profiles MUST NOT collapse these states where a core requirement depends on the
+distinction.
+
+### 3.2 Generic in-toto Statement
+
+This L2 example uses generic protocol vocabulary. Digests and identifiers are
+illustrative.
 
 ```json
 {
   "_type": "https://in-toto.io/Statement/v1",
   "subject": [
     {
-      "name": "example-42f1a3",
-      "digest": { "sha256": "<work_item_content_hash>" }
+      "name": "urn:example:entity:result",
+      "digest": {
+        "sha256": "5f70bf18a086007016e948b04aed3b82103a36be2d0e9b74066b7f7932f79a8c"
+      }
     }
   ],
-  "predicateType": "https://notme.bot/provenance/dispatch/v1",
-  "predicate": { ... }
-}
-```
-
-> **URI resolution**: `notme.bot` is the canonical namespace for APAS predicate
-> schemas, and hosts the standard itself. Its separation from any orchestrator
-> is deliberate — a predicate namespace owned by one orchestrator would make
-> the schema hostage to that orchestrator's lifecycle.
->
-> **Known coupling, stated plainly**: this namespace is a single
-> organization's domain. A predicate URI is an identifier rather than a
-> fetch target, so an implementation does not depend on that domain
-> resolving at verification time — but the *naming authority* is
-> centralized, and a wider adoption of APAS would need to move these URIs
-> under a neutral namespace. Until then, treat the string as a versioned
-> constant: implementations MUST match predicate URIs literally and MUST NOT
-> dereference them to decide how to parse a payload.
-
-### 3.2 Predicate: `dispatch/v1`
-
-```json
-{
-  "dispatchDefinition": {
-    "workItemRef": {
-      "repo": "example-repo",
-      "workItemId": "example-42f1a3",
-      "contentHash": "sha256:abc123..."
-    },
-    "pipeline": {
-      "phases": ["scoping-agent", "dev-agent", "staging-agent"],
-      "currentPhase": 1,
-      "pipelineId": "uuid"
+  "predicateType": "https://notme.bot/provenance/activity/v1",
+  "predicate": {
+    "apasVersion": "0.4.0-draft",
+    "profiles": [
+      "apas:carrier:in-toto-dsse/v1",
+      "example:topology:durable/v1",
+      "example:identity:workload/v1"
+    ],
+    "claimedLevel": "L2",
+    "activity": {
+      "id": "urn:uuid:1af73f40-d22b-4abc-a318-1fb990f0bd70",
+      "state": "Ended",
+      "segments": [
+        "urn:uuid:316606ef-e727-42eb-8fd3-04cad1f6d65d"
+      ],
+      "terminationReason": "completed",
+      "outcome": "degraded"
     },
     "agent": {
-      "name": "dev-agent",
-      "definition": "sha256:<hash of agent .md file>",
-      "provider": "provider-name",
-      "model": "model-version",
-      "permissionProfile": "implement"
-    }
-  },
-  "runDetails": {
-    "orchestrator": {
-      "name": "example-orchestrator",
-      "version": "0.1.0",
-      "identity": {
-        "identityToken": "SIG1.<payload>.<signature>",
-        "bridgeCert": "<base64 DER>"
+      "id": "urn:example:agent:change-reviewer",
+      "model": {
+        "provider": "example-provider",
+        "name": "example-model",
+        "version": "2026-08-01"
       }
     },
-    "execution": {
-      "workDir": "/path/to/worktree",
-      "startedAt": "2026-03-25T00:00:00Z",
-      "completedAt": "2026-03-25T00:05:00Z",
-      "durationMs": 300000,
-      "sessionId": "uuid",
-      "pid": 12345,
-      "isolationLevel": "git-worktree"
+    "workload": {
+      "identity": "spiffe://example.org/ns/agents/sa/reviewer",
+      "artifact": {
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
     },
-    "work": {
-      "commits": [
-        {
-          "sha": "abc123",
-          "message": "[example-42f1a3] fix(store): fast-fail connect",
-          "signature": "<git signature>"
+    "plan": {
+      "id": "urn:example:plan:review-change",
+      "digest": {
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    },
+    "used": [
+      {
+        "id": "urn:example:entity:change-request",
+        "digest": {
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+        },
+        "originStatus": "origin-unknown"
+      }
+    ],
+    "generated": [
+      {
+        "id": "urn:example:entity:result",
+        "digest": {
+          "sha256": "5f70bf18a086007016e948b04aed3b82103a36be2d0e9b74066b7f7932f79a8c"
         }
-      ],
-      "filesChanged": ["src/store/mod.rs", "src/scanner.rs"],
-      "linesAdded": 47,
-      "linesRemoved": 12
-    },
-    "verification": {
-      "passed": true,
-      "highestTier": 2,
-      "tiers": [
-        {"name": "commit-check", "passed": true},
-        {"name": "work-item-ref-check", "passed": true},
-        {"name": "diff-sanity", "passed": true}
-      ]
-    },
-    "cost": {
-      "totalUsd": 0.47,
-      "inputTokens": 14000,
-      "outputTokens": 1678
-    },
-    "outcome": {
-      "success": true,
-      "stopReason": "end_turn",
-      "workItemClosed": false
-    },
-    "handoffChain": {
-      "phaseHash": "sha256:<hash of this phase>",
-      "previousPhaseHash": "sha256:<hash of previous phase>",
-      "chainRoot": "sha256:<hash of phase 0>"
-    },
-    "_comment": "contentOrigins in full form — valid ONLY for a scoped carrier (§2.5 Privacy). On a broadcast carrier this key is replaced by originsHash.",
-    "contentOrigins": [
-      {
-        "uri": "https://docs.example.com/api/v2",
-        "vouchedBy": "substrate/lease-gate"
-      },
-      {
-        "uri": "context://repo/example-org/example-repo#pkg/example",
-        "vouchedBy": ""
       }
-    ]
+    ],
+    "events": [
+      {
+        "source": "urn:example:workload:reviewer",
+        "id": "urn:uuid:fa0b47a3-6cb0-4cf7-a9c3-035aecf4f16e",
+        "type": "org.example.tool.completed",
+        "activity": "urn:uuid:1af73f40-d22b-4abc-a318-1fb990f0bd70",
+        "segment": "urn:uuid:316606ef-e727-42eb-8fd3-04cad1f6d65d",
+        "occurrenceTime": "2026-08-12T16:00:00Z",
+        "entities": [
+          "urn:example:entity:change-request",
+          "urn:example:entity:result"
+        ],
+        "data": {
+          "tool": "change-analysis",
+          "result": "completed"
+        }
+      }
+    ],
+    "evidence": [
+      {
+        "profile": "example:evidence:tool-receipt/v1",
+        "mediaType": "application/json",
+        "digest": {
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+        },
+        "producer": "spiffe://example.org/ns/evidence/sa/recorder",
+        "scope": {
+          "activity": "urn:uuid:1af73f40-d22b-4abc-a318-1fb990f0bd70",
+          "segment": "urn:uuid:316606ef-e727-42eb-8fd3-04cad1f6d65d"
+        }
+      }
+    ],
+    "captureScope": {
+      "eventClasses": [
+        "tool",
+        "lifecycle",
+        "output"
+      ],
+      "sampling": "none",
+      "redactions": [],
+      "retention": "content-addressed",
+      "confidentiality": "restricted"
+    }
   }
 }
 ```
 
-**`contentOrigins`** (§2.5, optional) is the origin set for content the
-dispatch consumed. Rules that make it a record rather than a decoration:
+The predicate URI is a versioned identifier. It is not a trust anchor, an online
+dependency, a requirement to dereference the URI, or a requirement to use Notme
+credentials or services. Verifiers match its value literally and establish trust
+through an identity Profile.
 
-- **Absent ≠ empty, where the carrier can express it.** Omitting the field
-  asserts nothing about origins; present-and-empty (`[]`) says "we looked
-  and there was nothing to record". Both derive `origin-unknown` and
-  verifiers MUST NOT treat either as attested — the distinction is
-  provenance about the *record*, not a confidence difference. A carrier
-  that cannot represent it (the reference receipt encoding omits the field
-  entirely when there is nothing to commit, precisely to stay
-  byte-identical to pre-origin receipts) loses the distinction, which is
-  acceptable: nothing normative depends on it.
-- **`vouchedBy: ""`** means ingested-but-unvouched. It is expected in
-  normal operation and MUST NOT be normalized away, dropped on
-  serialization, or treated as an error. It is a single identifier, never
-  a list — see §2.5.
-- **Canonical ordering.** Entries are sorted by `uri` then `vouchedBy`,
-  both compared as ASCII byte sequences, and deduplicated by the whole
-  pair. Because both components are plain strings the comparator is total
-  and implementation-independent — which is what makes an `originsHash`
-  comparable across implementations at all.
-- **No actor entries.** The dispatch's own identity, its orchestrator, and
-  any authenticated submitter belong in `runDetails.orchestrator.identity`
-  and the bridge cert — never here. See §2.5's category line.
-- **Carrier rule.** On a broadcast carrier, replace `contentOrigins` with
-  `originsHash` — a digest over the canonical encoding of the set that
-  `contentOrigins` *would* have held. The two keys are mutually exclusive;
-  an attestation carrying both is malformed, because it publishes on a
-  broadcast carrier the very set the digest exists to withhold. See §2.5
-  Privacy for which carriers are which.
+### 3.3 Event and Evidence references
 
-The same predicate on a broadcast carrier therefore reads:
+An inline Event MUST identify its source, Event ID, type, Activity, and the
+Occurrence time or an explicit unknown value. It MUST identify its Segment when
+Segment attribution is known. It SHOULD reference relevant Entities and MAY
+carry Profile-defined data.
 
-```json
-{
-  "runDetails": {
-    "originsHash": "sha256:<digest of the canonical origin-set encoding>"
-  }
-}
-```
+When strict ordering is claimed, each Event or Event commitment MUST carry a
+sequence value or authenticated causal predecessor. Wall-clock timestamps alone
+do not establish order. An Event records an Occurrence; the Event record can
+also be an Entity and Evidence.
 
-A verifier holding only this can check that a disclosed set matches the
-commitment, but cannot enumerate the set — which is the point. Obtaining
-the set is a separate, scoped request (§2.5 Privacy).
+An Evidence reference MUST contain:
 
-### 3.3 Signing
+- a named, versioned Evidence Profile;
+- media type and content digest;
+- producer identity; and
+- Activity scope, plus Segment scope when applicable.
 
-The envelope is signed using DSSE (Dead Simple Signing Envelope):
+At L3 and L4, the Attestation Result MUST identify the Verifier, appraisal policy
+or policy digest, appraised Evidence, result, and Activity scope.
+
+### 3.4 DSSE authentication at L2 and above
+
+The in-toto Statement is the DSSE payload:
 
 ```json
 {
   "payloadType": "application/vnd.in-toto+json",
-  "payload": "<base64(attestation)>",
+  "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCIuLi4iOiIuLi4ifQ==",
   "signatures": [
     {
-      "keyid": "sha256:<public key hash>",
-      "sig": "<base64(ed25519 signature)>"
+      "keyid": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "sig": "MEUCIQDfZXhhbXBsZS1zaWduYXR1cmUtYnl0ZXMCIQCZmFrZS1idXQtd2VsbC1mb3JtZWQ="
     }
   ]
 }
 ```
 
-### 3.4 Signing Key Hierarchy
+The algorithm, key identifier semantics, credential lifetime, and trust mechanism
+come from the applied identity Profile. Failure to obtain usable signing
+authority MUST NOT produce a DSSE-shaped artifact with no valid signature. An
+implementation MAY emit a clearly unauthenticated L1 record instead when policy
+explicitly permits it.
 
-Signing uses the identity model defined by the identity authority. APAS does not
-define its own key format — it delegates to that role's existing specifications.
+An alternative carrier MAY be used only when it names its carrier Profile and
+maps losslessly to the baseline logical statement. A Relying Party MUST be able
+to distinguish an alternate carrier from the baseline and recover every
+normative distinction needed for the claimed level.
 
-| Level | Key Type | Lifetime | Defined In |
-|-------|----------|----------|------------|
-| User master key | Ed25519 | Long-lived | [`pkg/crypto/algorithm/ed25519.go`](../../pkg/crypto/algorithm/ed25519.go) |
-| Orchestrator bridge cert | X.509 + Ed25519 | Short-lived, per-dispatch | [`docs/design/004-bridge-certs.md`](../design/004-bridge-certs.md) |
-| Dispatch session key | Ephemeral Ed25519 | Per-session | [`pkg/crypto/epr/proof.go`](../../pkg/crypto/epr/proof.go) |
+### 3.5 Composable Profile axes
 
-The 4-entity identity model from [`pkg/sigid/`](../../pkg/sigid/) decomposes identity as:
-- **Owner**: the human user who authorized the dispatch
-- **Machine**: the host running the dispatch
-- **Actor**: the agent persona (dev-agent, staging-agent) — a definition, not a running instance
-- **Identity**: the cryptographic key binding all three to the running **dispatch** (the execution carrying the bridge-cert)
+Profiles are named and versioned. They compose along independent axes:
 
-The bridge cert IS the dispatch's identity. One Actor (agent definition) can produce many dispatches, each with its own short-lived bridge cert.
+| Axis | Defines |
+|---|---|
+| **Carrier** | Serialization, envelope, canonicalization, and transport mapping |
+| **Activity topology** | How implementation units map to Activities, Segments, parent/child relations, and resume |
+| **Evidence** | Evidence types, producers, protection, appraisal, and disclosure |
+| **Identity** | Agent, Workload, Attester, Verifier, authority, key, and trust semantics |
+| **Implementation** | A documented composition of the other Profiles plus implementation-specific fields |
 
-The shared signing primitive supports both RFC 5652 (signed attributes) and
-RFC 8419 (PureEdDSA). The reference orchestrator's shipped handoff-envelope
-path currently signs with its own Ed25519 implementation; consolidation onto
-the shared primitive remains a target (§7.3).
+An **orchestrated topology** may map a bounded delegated execution to an
+Activity and pipeline stages to child Activities or Segments. A **durable
+topology** may preserve one Activity across checkpoints and process boundaries.
+A **reconciliation topology** may represent convergence toward desired state as
+an Activity and each attempt or turn as a Segment or child Activity. These
+topologies are composable and none is the protocol's privileged shape.
 
-### 3.5 Predicate Splitting (Future)
+### 3.6 ART implementation and compatibility Profile (non-normative)
 
-> **Note**: The `dispatch/v1` predicate bundles dispatch definition, execution,
-> work, verification, cost, and handoff chain into a single predicate. This is
-> pragmatic for v0.1 but may need splitting in future versions — SLSA deliberately
-> separates `buildDefinition` from `runDetails` so different parties can attest
-> to different parts. A candidate split:
->
-> - `https://notme.bot/provenance/dispatch-definition/v1` — what was intended (work-item, pipeline, agent)
-> - `https://notme.bot/provenance/dispatch-execution/v1` — what happened (timing, work, cost)
-> - `https://notme.bot/provenance/dispatch-verification/v1` — what was verified (tiers, outcome)
->
-> Note: `https://notme.bot/provenance/handoff/v1` is already defined as the
-> predicate type for phase handoff attestations (distinct from the dispatch
-> predicate which covers the full execution).
+The ART Profile preserves the mechanisms from earlier APAS drafts without making
+them universal. Its complete implementation is the composition of Rosary,
+Cloister, Ley-line-open, Signet, Notme, and Mache; no component alone inherits
+the composition's aggregate assurance level.
 
-## 4. Hash Chain Structure
+The legacy predicate
+`https://notme.bot/provenance/dispatch/v1` remains a compatibility carrier. An
+ART verifier maps it to `activity/v1` as follows:
 
-### 4.1 Element Hashes **[TARGET — shipped handoff hash is narrower]**
+| ART field or mechanism | APAS mapping |
+|---|---|
+| dispatch ID and session | Activity and Segment identities |
+| agent definition, provider, model | AI Agent association and behavior-changing Entities |
+| work-item reference and pipeline | Plan, input Entity, parent/child Activity topology |
+| execution timestamps and isolation | lifecycle Events and execution Evidence |
+| permission profile and mediated tool calls | declared capability set and capability-use Events |
+| commits and changed files | generated Entities |
+| verification tiers | Evidence or Attestation Result, depending on producer independence |
+| cost and token usage | Profile-defined Event data |
+| outcome and stop reason | distinct outcome and termination reason |
+| handoff chain | Segment or child-Activity causal commitments |
 
-The hierarchy below is the target contract. The reference orchestrator
-currently implements work-item content hashes (`BeadSpec::content_hash()`) and
-a content-linked handoff hash at the Phase boundary (`Handoff::chain_hash()`),
-but the latter is
-not yet the full `H(Phase)` defined below. The shipped handoff hash covers phase
-number, agent name, work-item ID, summary, changed file paths, commit SHAs, and
-the previous handoff hash. It does not yet cover agent-definition content,
-bridge-cert identity, provider, or tool/action hashes. Lower levels (ToolCall,
-FileChange) and upper levels (WorkItemGroup, WorkItemLifecycle) also remain
-target design.
+ART identity decomposes Owner, Machine, Actor, and Identity. Signet bridge
+certificates bind a short-lived X.509/Ed25519 identity to a running dispatch;
+that dispatch maps to an Activity or Segment according to the topology Profile.
+Owner identifies the authorizing principal, Machine the host, Actor the agent
+definition, and Identity the cryptographic binding. The shared signing primitive
+supports RFC 5652 signed attributes and RFC 8419 PureEdDSA. Existing Rosary
+handoff envelopes use DSSE with an Ed25519 path; consolidation on the shared
+primitive is implementation status, not conformance semantics.
 
-```
+The Profile retains phase handoffs, work-item hierarchy, git commits, file
+changes, verification tiers, cost, and the following SHA-256 commitments:
+
+```text
 H(FileChange)        = SHA256(path || old_content || new_content)
 H(ToolCall)          = SHA256(tool_name || input_hash || output_hash || timestamp)
-H(Action)            = SHA256(H(ToolCall_0) || H(ToolCall_1) || ... || H(ToolCall_n))
+H(Action)            = SHA256(H(ToolCall_0) || ... || H(ToolCall_n))
 H(Phase)             = SHA256(agent_definition || dispatch_identity || provider || H(Action) || H(previous_phase))
-H(WorkItem)          = SHA256(H(Phase_0) || H(Phase_1) || ... || H(Phase_n))
-H(WorkItemGroup)     = SHA256(H(WorkItem_0) || H(WorkItem_1) || ... || H(WorkItem_m))
-H(WorkItemLifecycle) = SHA256(H(WorkItemGroup_0) || H(WorkItemGroup_1) || ... || H(WorkItemGroup_k))
+H(WorkItem)          = SHA256(H(Phase_0) || ... || H(Phase_n))
+H(WorkItemGroup)     = SHA256(H(WorkItem_0) || ... || H(WorkItem_m))
+H(WorkItemLifecycle) = SHA256(H(WorkItemGroup_0) || ... || H(WorkItemGroup_k))
 ```
 
-Target `H(Phase)` inputs:
-- `agent_definition` — content hash of the agent's `.md` file (the persona).
-- `dispatch_identity` — the dispatch's bridge-cert subject (the running execution that produced this Phase).
-- `provider` — implementation-defined model provider identifier.
-- Both `agent_definition` and `dispatch_identity` are required so a conformant Phase
-  binds the *what-was-supposed-to-run* to *what-actually-ran*.
+In Rosary, WorkItem maps to a bead, WorkItemGroup to a thread, and
+WorkItemLifecycle to a decade. Git object IDs are committed as opaque values
+inside APAS SHA-256 commitments, regardless of the repository's git object
+format. The shipped handoff chain commits phase number, agent, bead ID, summary,
+changed paths, commit IDs, and the previous handoff hash; it does not yet cover
+every input in the target `H(Phase)`.
 
-> **Implementation mapping** *(reference implementation, non-normative)*:
-> - `WorkItem` → *bead* (a file-scoped task tracked in `.beads/`).
-> - `WorkItemGroup` → *thread* (an ordered group of related beads).
-> - `WorkItemLifecycle` → *decade* (an ADR-level grouping of threads).
->
-> The hash hierarchy is orchestrator-agnostic — any APAS implementation
-> supplies its own work-item / grouping / lifecycle primitives that satisfy
-> the corresponding `H(...)` contract. These names are illustrative anchors,
-> never normative wire vocabulary.
+Ley-line-open supplies content-addressed execution contracts, receipts, and
+storage primitives. Their CAS digests map to Entity and Evidence digests; the
+digest algorithm and canonical bytes MUST be identified by the ART Carrier or
+Evidence Profile rather than inferred from an object-store path. Cloister's
+runtime permission mediation and declared filesystem, network, port, and tool
+boundaries map to L3 capability declarations and protected Evidence.
 
-### 4.2 Chain Properties
+The ART origin encoding preserves these rules:
 
-The target hierarchy has the properties below. The shipped handoff chain
-currently provides tamper evidence and ordering across Phase handoffs;
-completeness and a root spanning the full work-item hierarchy remain targets.
+- `contentOrigins` is a canonically ordered array of `{uri, vouchedBy}`
+  entries on a scoped carrier; `originsHash` is the digest-only form on a
+  broadcast carrier, and the two fields are mutually exclusive.
+- Absent origin data and a present empty array both derive
+  `origin-unknown`, but their record semantics remain distinct where the
+  carrier can express the distinction.
+- `vouchedBy: ""` means ingested but unvouched and MUST NOT be normalized away.
+- Entries sort by `uri` and then `vouchedBy` as ASCII byte sequences and are
+  deduplicated by the entire pair.
+- Agent, orchestrator, and submitter identities are not origin entries.
+- Disclosure defaults to `originsHash` when carrier confidentiality is
+  uncertain.
 
-- **Tamper-evident**: Modifying any element changes its hash, which propagates upward
-- **Ordered**: The chain encodes temporal ordering via sequential hashing
-- **Complete**: A valid chain requires all elements; gaps are detectable
-- **Rooted**: The decade hash is the root of trust for the entire work decomposition
+### 3.7 Causality, ordering, and completeness
 
-> **SHA-256 vs git SHA-1**: APAS uses SHA-256 throughout. Git commit SHAs
-> (currently SHA-1, transitioning to SHA-256) are included in `Handoff::commit_shas`
-> and hashed into `chain_hash()` as opaque byte strings — binding the provenance
-> chain to the actual code committed. When git repos opt into SHA-256 object
-> format, the commit references will be natively compatible with APAS hashes.
+APAS uses W3C PROV-style relations:
 
-### 4.3 Content-Linked Chain Hash (Shipped)
+- an Activity `used` an input Entity;
+- an output Entity `wasGeneratedBy` an Activity;
+- an Activity `wasAssociatedWith` an AI Agent and Workload;
+- a Segment or child Activity `wasInformedBy` its authenticated predecessor;
+- parent/child relations express decomposition; and
+- an Event records an Occurrence affecting an Activity and references the
+  relevant Entities.
 
-> **Shipped in the reference orchestrator** (`fix(handoff): content-linked
-> chain hash`). Its `Handoff` struct carries `previous_chain_hash: Option<String>` —
-> the hex-encoded SHA-256 produced by `chain_hash()` on the previous phase's
-> `Handoff` struct (hashing phase, agent, bead_id, summary, files, commit SHAs,
-> and the prior chain link — not raw JSON bytes). `chain_hash()` includes this
-> hash, not a file path. Replacing a handoff file without knowing its hash breaks the chain.
->
-> The reference orchestrator added `commit_shas: Vec<String>` to `Handoff`, binding the chain to
-> the actual committed code — two handoffs with identical summaries but different
-> commits produce different hashes.
->
-> See the reference orchestrator's `src/handoff.rs` for the implementation and
-> chain_hash test suite.
+Content digests bind identity to bytes but do not by themselves prove sequence
+or completeness. When an attestation claims strict ordering or complete capture,
+it MUST authenticate sequence numbers, causal predecessor links, a content-linked
+hash chain, a Merkle commitment, or an equivalent omission-detecting structure.
+The chosen structure and canonicalization belong to a Carrier or Evidence
+Profile.
 
+Timestamps, filenames, storage order, sampled telemetry, and a collection of
+otherwise valid signatures do not prove completeness. A chain root is a
+commitment, not automatically a trust root; the Relying Party still evaluates
+who authenticated it and what capture scope it covers.
 ## 5. Adversarial Model
 
 ### 5.1 Threats Addressed
