@@ -336,18 +336,23 @@ func (ca *LocalCA) CreateCACertificateTemplate() *x509.Certificate {
 		return nil
 	}
 
-	// CA certificate has a long validity (10 years for the master key)
-	now := time.Now()
-
 	// Parse DID as URI for SAN
 	didURI, _ := url.Parse(ca.issuerDID)
 
+	// The validity window is FIXED, not relative to time.Now(). This template
+	// is rebuilt from the master key at every verification (pkg/git/verify.go)
+	// to serve as the trust anchor, and go-cms pins chain validation to the
+	// leaf's signing moment (SkipTimeValidation). A now-relative NotBefore
+	// therefore made every signature unverifiable once it was older than the
+	// backdating window: signed-at fell before verify-time-minus-24h and the
+	// chain failed as "CA not yet valid" (signet-2b48eb). The window carries
+	// no freshness control — that lives in the short-lived leaf certificates.
 	return &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject:      EncodeDIDAsSubject(ca.issuerDID),
-		Issuer:       EncodeDIDAsSubject(ca.issuerDID),   // Self-issued
-		NotBefore:    now.Add(-24 * time.Hour),           // Valid from yesterday to avoid clock skew
-		NotAfter:     now.Add(10 * 365 * 24 * time.Hour), // Valid for 10 years
+		Issuer:       EncodeDIDAsSubject(ca.issuerDID), // Self-issued
+		NotBefore:    time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:     time.Date(2120, time.January, 1, 0, 0, 0, 0, time.UTC),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		// NOTE: CA certificates should NOT have ExtKeyUsage restrictions.
 		// ExtKeyUsage restricts certificate usage, which conflicts with the CA role.

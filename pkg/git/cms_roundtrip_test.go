@@ -26,10 +26,11 @@ import (
 // signetCMSTestFixture builds a CA, an ephemeral code-signing leaf, and the
 // trust pool a verifier would construct from the published CA bundle.
 type signetCMSTestFixture struct {
-	leaf     *x509.Certificate
-	leafKey  ed25519.PrivateKey
-	roots    *x509.CertPool
-	verifyCA *x509.Certificate
+	leaf      *x509.Certificate
+	leafKey   ed25519.PrivateKey
+	roots     *x509.CertPool
+	verifyCA  *x509.Certificate
+	masterKey ed25519.PrivateKey
 }
 
 func newSignetCMSTestFixture(t *testing.T) signetCMSTestFixture {
@@ -67,7 +68,7 @@ func newSignetCMSTestFixture(t *testing.T) signetCMSTestFixture {
 	roots := x509.NewCertPool()
 	roots.AddCert(caCert)
 
-	return signetCMSTestFixture{leaf: leaf, leafKey: leafPriv, roots: roots, verifyCA: caCert}
+	return signetCMSTestFixture{leaf: leaf, leafKey: leafPriv, roots: roots, verifyCA: caCert, masterKey: masterKey}
 }
 
 func (f signetCMSTestFixture) verifyOptions() cms.VerifyOptions {
@@ -96,6 +97,64 @@ func TestCMSSignVerifyRoundTrip(t *testing.T) {
 	}
 	if !certs[0].Equal(f.leaf) {
 		t.Fatalf("verify returned a different signer certificate: %s", certs[0].Subject)
+	}
+}
+
+// fixedTime is a cms.TimeSource pinned to one instant, so a test can produce
+// a signature genuinely created in the past.
+type fixedTime time.Time
+
+func (f fixedTime) Now() time.Time { return time.Time(f) }
+
+// A commit signed more than 24 hours ago must still verify (signet-2b48eb).
+//
+// The verifier reconstructs the trust-root CA at VERIFY time, while go-cms's
+// SkipTimeValidation pins chain validation to the SIGNING moment
+// (leaf.NotBefore + 1s). If the CA template's validity window is relative to
+// verify-time now, every signature older than the window's backdating fails
+// chain validation ("CA not yet valid at signing time") — git history reads
+// as BADSIG after one day. The leaf here is minted 25h in the past to model
+// an old commit; the trust pool is built fresh, exactly as verify.go does.
+func TestCMSVerifyAcceptsSignatureOlderThanCABackdating(t *testing.T) {
+	f := newSignetCMSTestFixture(t)
+
+	signedAt := time.Now().Add(-25 * time.Hour)
+	leafPub, leafPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate leaf key: %v", err)
+	}
+	serial, err := attestx509.GenerateSerialNumber()
+	if err != nil {
+		t.Fatalf("generate serial: %v", err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber:          serial,
+		Subject:               f.leaf.Subject,
+		NotBefore:             signedAt,
+		NotAfter:              signedAt.Add(5 * time.Minute),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+		BasicConstraintsValid: true,
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, f.verifyCA, leafPub, f.masterKey)
+	if err != nil {
+		t.Fatalf("issue backdated leaf: %v", err)
+	}
+	oldLeaf, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		t.Fatalf("parse backdated leaf: %v", err)
+	}
+
+	commitData := []byte("tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\ncommit signed yesterday\n")
+	signature, err := cms.SignDataWithOptions(commitData, oldLeaf, leafPriv, cms.SignOptions{
+		TimeSource: fixedTime(signedAt.Add(time.Second)),
+	})
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+
+	if _, err := cms.Verify(signature, commitData, f.verifyOptions()); err != nil {
+		t.Fatalf("a day-old commit signature must still verify against the reconstructed trust anchor: %v", err)
 	}
 }
 
