@@ -17,11 +17,19 @@ This is an internal design document, not an IETF Internet-Draft. It uses RFC-sty
 > The actual implementation (`pkg/http/middleware/`, `pkg/signet/sig1.go`) uses `Signet-Proof:`
 > with the SIG1 wire format (`SIG1.<CBOR>.<COSE_Sign1>`). The implementation is authoritative;
 > this document describes the conceptual design that informed it.
-Internet-Drafts are working documents of the Internet Engineering Task Force (IETF). Note that other groups may also distribute working documents as Internet-Drafts. The list of current Internet-Drafts is at https://datatracker.ietf.org/drafts/current/.
+>
+> The same applies to the canonical string in §3.2. The implementation
+> (`defaultRequestBuilderImpl.Build`, `pkg/http/middleware/options.go`) signs
+> `METHOD|PATH[?QUERY]|TIMESTAMP|NONCE_B64` — `|`-delimited, query included
+> (per RFC 9421, to prevent parameter injection), host **not** included.
+> §3.2's `\n`-delimited string with `<host>` is the conceptual design only;
+> a client implementing §3.2 literally will produce proofs the middleware
+> rejects. The host and body coverage gaps relative to this design are
+> tracked in bead `signet-3e1cf8`.
 
 ## Copyright Notice
 
-Copyright (c) 2025 IETF Trust and the persons identified as the document authors. All rights reserved.
+Copyright (c) 2025 the document authors. All rights reserved.
 
 ## 1. Introduction
 
